@@ -28,6 +28,13 @@ except ModuleNotFoundError as e:
     ) from e
 
 try:
+    from langchain_google_genai import GoogleGenerativeAIEmbeddings
+except ModuleNotFoundError as e:
+    raise RuntimeError(
+        "Missing dependency 'langchain-google-genai'. Run 'pip install -r requirements.txt'"
+    ) from e
+
+try:
     from langchain_core.documents import Document
 except ModuleNotFoundError as e:
     raise RuntimeError(
@@ -84,19 +91,23 @@ def ingest_pdf():
     # Initialize embeddings: prefer OpenAI if available, otherwise try Google GenAI.
     google_model = os.getenv("GOOGLE_EMBEDDING_MODEL")
 
-    GoogleEmbeddings = None
-    try:
-        # langchain-google-genai integration may expose a embeddings class; try to import a common candidate.
-        from langchain_google_genai import GoogleVertexAIEmbeddings as _GEmb  # type: ignore
-        GoogleEmbeddings = _GEmb
-    except Exception:
-        GoogleEmbeddings = None
+    # If no model is configured, default to the Gemini embeddings model
+    # recommended in the Gemini docs.
+    if not google_model:
+        google_model = "gemini-embedding-001"
+    else:
+        # Sanitize legacy/ambiguous model names (e.g. 'embedding-001')
+        if "embedding-001" in google_model and "gemini" not in google_model:
+            google_model = "gemini-embedding-001"
 
+    print(f"Using Google embedding model: {google_model}")
+
+    # Prefer OpenAI embeddings when an OpenAI API key is available.
     if os.getenv("OPENAI_API_KEY"):
-        embeddings = OpenAIEmbeddings(model=os.getenv("OPENAI_MODEL", "text-embedding-3-small"))
-    elif os.getenv("GOOGLE_API_KEY") and GoogleEmbeddings is not None:
-        # Rely on the langchain-google-genai implementation. The class may accept `model`.
-        embeddings = GoogleEmbeddings(model=google_model) if google_model else GoogleEmbeddings()
+        embeddings = OpenAIEmbeddings()
+    elif os.getenv("GOOGLE_API_KEY"):
+        # Rely on the langchain-google-genai implementation.
+        embeddings = GoogleGenerativeAIEmbeddings(model=google_model)
     else:
         raise RuntimeError(
             "No supported embeddings provider configured. Set OPENAI_API_KEY or GOOGLE_API_KEY and ensure the corresponding langchain integration is installed."
